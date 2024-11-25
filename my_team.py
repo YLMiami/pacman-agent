@@ -7,11 +7,13 @@
 # For more info, see http://inst.eecs.berkeley.edu/~cs188/sp09/pacman.html
 
 import random
-import contest.util as util
+import sys
+sys.path.append('./pacman-contest/src/contest')
 
-from contest.capture_agents import CaptureAgent
-from contest.game import Directions
-from contest.util import nearest_point
+import util as util
+from capture_agents import CaptureAgent
+from game import Directions
+from util import nearest_point
 
 
 #################
