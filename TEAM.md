@@ -1,6 +1,6 @@
 # Team Information
 
-**Course:** _[fill your course code and name]_
+**Course:** _Autonomous Systems - EMAI_
 
 **Semester:** Semester 1, 2024
 
