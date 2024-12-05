@@ -111,9 +111,15 @@ def is_within_bounds_and_not_wall(game_state, position):
 
 
 def arena_width(game_state):
+    """
+    Returns the width of the game arena.
+    """
     return game_state.get_walls().width
 
 def arena_height(game_state):
+    """
+    Returns the heigth of the game arena.
+    """
     return game_state.get_walls().height
 ######################
 # ReflexCaptureAgent #
@@ -273,19 +279,19 @@ class ReflexCaptureAgent(CaptureAgent):
         self._add_to_priority_queue(priority_queue, game_state, 0, None, None, target_position, counter)
 
         while not priority_queue.empty():
-            previous, current_state, path_cost = self._extract_from_priority_queue(priority_queue)
+            state_data, current_state, path_cost = self._extract_from_priority_queue(priority_queue)
             current_position = self.get_my_position(current_state)
             #print(previous)
             if current_position == target_position:
                 #print(current_position, "\n", target_position)
-                return self._extract_first_action(previous)
+                return self._extract_first_action(state_data)
 
             for action in current_state.get_legal_actions(self.index):
                 next_state = self.get_next_game_state(current_state, action)
                 new_position = self.get_my_position(next_state)
                 if new_position not in visited:
                     visited.add(new_position)
-                    self._add_to_priority_queue(priority_queue, next_state, path_cost + 1, previous, action, target_position, counter)
+                    self._add_to_priority_queue(priority_queue, next_state, path_cost + 1, state_data, action, target_position, counter)
 
         return "Stop"
 
@@ -340,8 +346,12 @@ class ReflexCaptureAgent(CaptureAgent):
         Returns:
             str: The first action.
         """
-        while state["previous"]["previous"]:
+        print("1")
+        if state["previous"] is None:
+            return state["action"]
+        while state["previous"]["previous"] is not None:
             state = state["previous"]
+        print(state)
         return state["action"]
 
 
@@ -634,7 +644,7 @@ class DefensiveAgent(ReflexCaptureAgent):
 '''
 
 
-class DefensiveAgent(ReflexCaptureAgent):
+class DefensiveAgent2(ReflexCaptureAgent):
     """
     Cool Defender
     """
@@ -650,6 +660,17 @@ class DefensiveAgent(ReflexCaptureAgent):
 
         return best_action
     
+    def sort_distances(self, distances):
+        return [dist[1] for dist in sorted(distances)]
+    
+    def near_center(self, game_state, my_x):
+        w = arena_width(game_state)
+        if self.red:
+            x_left, x_right = w // 2 - 5, w // 2 - 1
+        else:
+            x_left, x_right = w // 2, w // 2 + 4 
+        return x_left <= my_x <= x_right
+    
     def choose_targets(self, game_state):
 
         my_position = self.get_my_position(game_state)
@@ -662,7 +683,7 @@ class DefensiveAgent(ReflexCaptureAgent):
         excluded_cells = self.get_edge_home_cells(game_state, enemy_home=True)
         
         if game_state.data.timeleft > 1100:
-            return [h[len(h) // 2 - 1]], excluded_cells
+            return [home_positions[len(home_positions) // 2 - 1]], excluded_cells
 
         if p and self.near_center(game_state, self.get_my_position(game_state)[0]):
             return self.sort_distances(self.calculate_distances_with_positions(game_state, p))[:1], excluded_cells
@@ -688,5 +709,134 @@ class DefensiveAgent(ReflexCaptureAgent):
                 return curr_cell
 
     def choose_best_action_for_target(self, game_state, targets, excluded_positions):
-        return self.Astar(game_state, targets[0], excluded_positions)
+        print("Defender")
+        return self.astar_pathfinding(game_state, targets[0], excluded_positions)
     
+
+class DefensiveAgent(ReflexCaptureAgent):
+    """
+    A defensive agent that prioritizes protecting the home side,
+    intercepting invaders (enemy Pac-Men), and responding to ghost threats.
+    """
+    
+    def choose_action(self, game_state):
+        """
+        Main function to choose the best action based on the game state.
+        This involves deciding the best target (invader, ghost, or home) 
+        and finding the path to that target.
+        
+        Args:
+            game_state: The current state of the game.
+        
+        Returns:
+            str: The best action to take.
+        """
+        # Determine the target (invader, ghost, or home) and the positions to avoid
+        targets, excluded_positions = self.choose_target(game_state)
+        
+        # Calculate the best action to reach the target using A* pathfinding
+        return self.choose_best_action(game_state, targets, excluded_positions)
+
+    def choose_target(self, game_state):
+        """
+        Decides the target the defender should focus on based on the current game state.
+        Possible targets include home positions, enemy Pac-Men, or ghosts.
+        
+        Args:
+            game_state: The current state of the game.
+        
+        Returns:
+            tuple: A list of target positions and a list of positions to avoid.
+        """
+        my_position = self.get_my_position(game_state)
+        home_positions = self.get_edge_home_cells(game_state)  # Home cells to defend
+        excluded_home_positions = self.get_edge_home_cells(game_state, enemy_home=True)  # Enemy home cells to avoid
+        pacmen_positions = self.get_enemy_pacmen_positions(game_state)  # Enemy Pac-Men positions
+        ghosts, scared_ghosts = self.get_enemy_ghost_positions(game_state)  # Ghosts and scared ghosts
+
+        # If we're early in the game, just patrol the home area
+        if game_state.data.timeleft > 1100:
+            return [home_positions[len(home_positions) // 2 - 1]], excluded_home_positions
+
+        # If Pac-Men are close to the center, prioritize intercepting them
+        if pacmen_positions and self.is_near_center(game_state, my_position[0]):
+            return self.sort_positions_by_distance(game_state, pacmen_positions)[:1], excluded_home_positions
+
+        # If there are Pac-Men, target the closest one
+        if pacmen_positions:
+            closest_home_cell = self.find_best_cell_to_intercept(game_state, pacmen_positions)
+            return [closest_home_cell], excluded_home_positions
+
+        # If there are ghosts or scared ghosts, target the nearest one
+        if ghosts or scared_ghosts:
+            closest_home_cell = self.find_best_cell_to_intercept(game_state, ghosts + scared_ghosts)
+            return [closest_home_cell], excluded_home_positions
+
+        # Default: Patrol home if no immediate threats
+        return [random.choice(home_positions)], excluded_home_positions
+
+    def is_near_center(self, game_state, agent_x):
+        """
+        Checks if the agent is near the center of the map.
+        The center is the most strategic place to defend.
+        
+        Args:
+            game_state: The current game state.
+            agent_x: The x-coordinate of the agent.
+        
+        Returns:
+            bool: True if the agent is near the center of the map.
+        """
+        map_width = arena_width(game_state)
+        center_left = map_width // 2 - 5
+        center_right = map_width // 2 + 4
+        return center_left <= agent_x <= center_right
+
+    def find_best_cell_to_intercept(self, game_state, targets):
+        """
+        Finds the best position to intercept invaders or ghosts heading towards the home side.
+        
+        Args:
+            game_state: The current game state.
+            targets: List of enemy positions (either Pac-Men or ghosts).
+        
+        Returns:
+            tuple: The best position to intercept the target.
+        """
+        target_position = self.sort_positions_by_distance(game_state, targets)[0]
+        map_width = arena_width(game_state)
+        possible_x_positions = range(map_width // 2 - 1, -1, -1) if self.red else range(map_width // 2, map_width)
+
+        # Find the closest available cell facing the target
+        for x in possible_x_positions:
+            curr_cell = (x, target_position[1])
+            if is_within_bounds_and_not_wall(game_state, curr_cell):
+                return curr_cell
+
+    def sort_positions_by_distance(self, game_state, positions):
+        """
+        Sorts a list of positions based on their maze distance to the agent's current position.
+        
+        Args:
+            game_state: The current game state.
+            positions: List of positions to sort.
+        
+        Returns:
+            list: The positions sorted by distance to the agent.
+        """
+        my_position = self.get_my_position(game_state)
+        return sorted(positions, key=lambda pos: self.get_maze_distance(my_position, pos))
+
+    def choose_best_action(self, game_state, targets, excluded_positions):
+        """
+        Uses A* pathfinding to choose the best action to reach the chosen target.
+        
+        Args:
+            game_state: The current game state.
+            targets: List of target positions.
+            excluded_positions: List of positions to avoid during pathfinding.
+        
+        Returns:
+            str: The first action towards the chosen target.
+        """
+        return self.astar_pathfinding(game_state, targets[0], excluded_positions)
