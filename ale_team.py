@@ -132,10 +132,12 @@ class ReflexCaptureAgent(CaptureAgent):
         self.returning_home = False
         self.escape_deadlock_state = 0
         self.deadlock_cell = [0, 0]
+        self.total_food_enemies = 0
 
     def register_initial_state(self, game_state):
         self.start = game_state.get_agent_position(self.index)  # Start position of the agent (int x, int y)
         CaptureAgent.register_initial_state(self, game_state)
+        self.total_food_enemies = self.get_total_food_enemies(game_state)
         
     ### Core Utilities ###
 
@@ -154,7 +156,10 @@ class ReflexCaptureAgent(CaptureAgent):
         
     def in_lead(self, game_state):
         """
-        Checks if the agent's team is leading in score.
+        Checks if the agent's team is leading in score. 
+        Red team scores are positive, while Blue team scores are negative.
+        The score of the game is the sum of the two team's scores.
+        Therefore, the agent is in the lead if the score is positive.
         """
         return game_state.data.score if self.red else -game_state.data.score
     
@@ -178,7 +183,7 @@ class ReflexCaptureAgent(CaptureAgent):
         """
         return game_state.get_agent_state(self.index).get_position()
     
-    def calculate_distances_to(self, game_state, positions):
+    def get_distances_to(self, game_state, positions):
         """
         Calculates maze distances from the agent's position to a list of target positions.
         """
@@ -188,7 +193,7 @@ class ReflexCaptureAgent(CaptureAgent):
         """
         Returns a list of tuples (distance, position) for given target positions.
         """
-        return list(zip(self.calculate_distances_to(game_state, positions), positions)) 
+        return list(zip(self.get_distances_to(game_state, positions), positions)) 
     
     def sort_positions_by_distance(self, game_state, targets):
         """
@@ -238,6 +243,18 @@ class ReflexCaptureAgent(CaptureAgent):
             edibles.extend(self.get_enemy_pacmen_positions(game_state))
 
         return self.sort_positions_by_distance(game_state, edibles)
+    
+    def get_our_food(self, game_state):
+        """
+        Returns a list of food positions in the agent's territory.
+        """
+        return self.get_food_you_are_defending(game_state).as_list()
+
+    def get_total_food_enemies(self, game_state):
+        """
+        Returns the total number of food enemies can eat in our territory.
+        """
+        return len(self.get_our_food(game_state))
 
     
     ## On Pacman ##
@@ -430,7 +447,7 @@ class ReflexCaptureAgent(CaptureAgent):
         return previous["action"]
         
 
-class OffensiveReflexAgent(ReflexCaptureAgent):
+class OffensiveReflexAgent2(ReflexCaptureAgent):
     """
     Cool Attacker
     """
@@ -451,85 +468,114 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         return best_action
     
 
-    def go_home(self, game_state):# If you have enough food to win, go home
-        food_left = self.get_food_count(game_state)
-        carrying = self.num_carrying(game_state)
-
-        h = self.get_closest_home_cell_position(game_state)
-
-        # If you have enough food to win, go home
-        if food_left <= 2:
-            return h
-
-        # If we carry food and time is running out then it's better to go home 
-        if carrying and game_state.data.timeleft < 100:
-            return h
-
-        # If you decided to play safe and go home, go home (if you returned all of the food you were carrying stop going home)
-        if not carrying:
-            self.returning_home = False
-
-        if self.returning_home:
-            return h
-        
-    
-
     def choose_targets(self, game_state):
-        food_left = self.get_food_count(game_state)
-        carrying = self.num_carrying(game_state)
-
-        f = self.get_edibles(game_state)
-        h = self.get_closest_home_cell_position(game_state)
-        c = self.get_capsules(game_state)
-        p = self.get_enemy_pacmen_positions(game_state)
-        
-        ghosts, scared_ghosts = self.get_enemy_ghost_positions(game_state)
-        
+        # First thing first, check if you should go home
         home_cell = self.go_home(game_state)
         if home_cell:
             return home_cell
+
+        # Get relevant game state information.
+        carrying = self.num_carrying(game_state)
+        edibles_positions = self.get_edibles(game_state)
+        closest_home = self.get_closest_home_cell_position(game_state)
+        capsules = self.get_capsules(game_state)
+        enemy_pacmen = self.get_enemy_pacmen_positions(game_state)
+        ghosts, scared_ghosts = self.get_enemy_ghost_positions(game_state)
+        
+        # Handle deadlock state.
+        if self.handle_deadlock(game_state, enemy_pacmen):
+            return enemy_pacmen
         
         # If we are escaping, go to deadlock cell (stop escaping when we reach that cell)
         if self.get_my_position(game_state) == self.deadlock_cell:
             self.escape_deadlock_state = 0
         
         # If your already on your side and are running, if there are enemies you can chase, go after them
-        if self.escape_deadlock_state and p and not self.scared(game_state):
+        if self.escape_deadlock_state and enemy_pacmen and not self.scared(game_state):
             self.escape_deadlock_state = 2
-            return p
+            return enemy_pacmen
         
         if self.escape_deadlock_state == 1:
             # We wish to exclude enemy home edge cells when going to escape position
             if self.in_lead(game_state) > 0:
                 return [self.deadlock_cell], self.get_edge_home_cells(game_state, enemy_home=True)  
             else:
-                return f
+                return edibles_positions
         else:
             # No more deadlock
             self.escape_deadlock_state = 0
 
         # If you dont see anyone, go get food
         if not scared_ghosts and not ghosts:
-            return f
+            return edibles_positions
 
         # If you see enemy ghosts and there is a capsule, go get the capsule
-        if ghosts and c:
-            return c
+        if ghosts and capsules:
+            return capsules
 
         # If you see a ghost and there is no capsules
         if ghosts:
             # If a ghost is near you and you have food, play safe and start going home (otherwise take the risk)
-            if carrying and min(self.calculate_distances_to(game_state, ghosts)) < 3:
+            if carrying and min(self.get_distances_to(game_state, ghosts)) < 3:
                 self.returning_home = True
-                return h
+                return closest_home
             
         # If none of the above conditions happened then go for food
-        return f
+        return edibles_positions
+
+    def go_home(self, game_state):
+        """
+        Determines if the agent should return home based on game conditions.
+        """
+        carrying = self.num_carrying(game_state)
+        closest_home = self.get_closest_home_cell_position(game_state)
+
+        # If the agent has enough food to secure a win, return home.
+        if self.get_food_count(game_state) <= 2:
+            return closest_home
+
+        # If time is running out and the agent is carrying food, return home.
+        if carrying and game_state.data.timeleft < 100:
+            return closest_home
+
+        # If the agent has dropped off food, stop returning home.
+        if not carrying:
+            self.returning_home = False
+
+        # Continue returning home if already decided.
+        if self.returning_home:
+            return closest_home
+
+        return False
     
+    def handle_deadlock(self, game_state, enemy_pacmen):
+        """
+        Handles the agent's behavior in a deadlock situation.
+        """
+        # If the agent is in its deadlock cell, reset the escape state.
+        if self.get_my_position(game_state) == self.deadlock_cell:
+            self.escape_deadlock_state = 0
+
+        # If in an escape state and enemies are nearby, prioritize chasing them.
+        if self.escape_deadlock_state and enemy_pacmen and not self.scared(game_state):
+            self.escape_deadlock_state = 2
+            return True
+
+        # If escape state 1, plan to escape or focus on food collection.
+        if self.escape_deadlock_state == 1:
+            if self.in_lead(game_state) > 0:
+                return [self.deadlock_cell], self.get_edge_home_cells(game_state, enemy_home=True)
+            return False
+
+        # Reset deadlock state if none of the conditions apply.
+        self.escape_deadlock_state = 0
+        return False
+    
+
     def choose_best_action_for_target(self, game_state, targets, excluded_positions):
         ghosts, scared_ghosts = self.get_enemy_ghost_positions(game_state)
         my_pos = self.get_my_position(game_state)
-        ghost_dists = self.calculate_distances_to(game_state, ghosts)
+        ghost_dists = self.get_distances_to(game_state, ghosts)
 
         if len(targets) == 1 or not ghost_dists:
             return self.Astar(game_state, targets[0], excluded_positions)
@@ -550,6 +596,109 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
                 return self.Astar(game_state, self.deadlock_cell, self.get_edge_home_cells(game_state, enemy_home=True))    
             else:
                 return self.Astar(game_state, targets[-1], excluded_positions)
+
+
+class OffensiveReflexAgent(ReflexCaptureAgent):
+    def choose_action(self, game_state):
+        # If the agent is pacman, meaning that is the opponent's side
+        if self.is_pacman(game_state):
+
+            # If the agent has enough food to secure a win, return home.
+            if self.get_food_count(game_state) <= 2:
+                return self.go_home(game_state)
+            
+            enemy_ghosts, scared_enemy_ghosts = self.get_enemy_ghost_positions(game_state)
+            edibles_positions = self.get_edibles(game_state)
+
+            # If there are scared enemy ghosts, it means that we ate a power-up, so go either after food indisturbed or after the closest enemy
+            if scared_enemy_ghosts and not enemy_ghosts:
+                return self.Astar(game_state, edibles_positions[0])
+            
+            # If it's being chased by an enemy ghost, plan an escape strategy
+            if enemy_ghosts:
+                best_action = self.plan_escape_strategy(game_state, enemy_ghosts)
+                return best_action
+
+            ### Not being chased ###
+            agent_location = self.get_my_position(game_state)
+            closest_home = self.get_closest_home_cell_position(game_state)
+            distance_to_home = self.get_maze_distance(agent_location, closest_home)
+            if game_state.data.timeleft < distance_to_home * 6:    # 1.5 times distance to home
+                return self.go_home(game_state)
+            
+            return self.Astar(game_state, edibles_positions[0])
+            
+        else:
+            # The agent is a ghost
+            edibles_positions = self.get_edibles(game_state)
+
+            # Check if there are enemy pacmen on the agent's side (also the defender should communicate for pacman checking)
+            enemy_pacmen = self.get_enemy_pacmen_positions(game_state)
+            if enemy_pacmen:
+                # If the agent is scared, go after food in the other half.
+                if self.scared(game_state):
+                    agent_location = self.get_my_position(game_state)
+                    for food in edibles_positions:
+                        distance_between_me_and_food = self.get_maze_distance(agent_location, food)
+                        distance_between_enemy_pacman_and_food = self.get_maze_distance(enemy_pacmen, food)
+                        if distance_between_me_and_food < distance_between_enemy_pacman_and_food:
+                            return self.Astar(game_state, food)
+                        
+                # Communicate with defender, see if he needs help
+                # Compute how much food the attacker's carrying
+                my_food = self.get_our_food(game_state)
+                enemy_carrying = self.total_food_enemies - len(my_food) - self.in_lead(game_state)
+                
+                # If he's carrying a lot of food, go after the enemy pacmen
+
+            # Go for closest food if there is no rush in escaping or killing enemy. Do your duty as an attacker!
+            return self.Astar(game_state, edibles_positions[0])
+    
+    def go_home(self, game_state):
+        """
+        Returns the best action to take to go home.
+        """
+        closest_home = self.get_closest_home_cell_position(game_state)
+
+        return self.Astar(game_state, closest_home[0])
+    
+    def plan_escape_strategy(self, game_state, enemy_ghosts):
+        """
+        Plans an escape strategy when being chased by enemy ghosts.
+        """
+        # If I can reach a capsule before the ghost catches me, go for it
+        agent_location = self.get_my_position(game_state)
+        capsules = self.get_capsules(game_state)
+        for capsule in capsules:
+            distance_to_capsule = self.get_maze_distance(agent_location, capsule)
+            ghost_to_capsule = min(self.get_maze_distance(capsule, ghost) for ghost in enemy_ghosts)
+            if distance_to_capsule < ghost_to_capsule:
+                return self.Astar(game_state, capsule)
+
+        # Carefully plan the next step.
+        closest_home = self.get_closest_home_cell_position(game_state)
+        distance_between_ghost_and_my_home_cell = min(self.get_maze_distance(closest_home, ghost) for ghost in enemy_ghosts)
+        edibles_positions = self.get_edibles(game_state)    # food or enemy ghosts if not scared
+        for food in edibles_positions:
+            distance_between_pacman_and_food = self.get_maze_distance(agent_location, food)
+            distance_between_food_and_my_home_cell = self.get_maze_distance(food, closest_home)
+
+            # Go after food only if you can manage to get it and go back home before the ghost catches you
+            if distance_between_pacman_and_food + distance_between_food_and_my_home_cell < distance_between_ghost_and_my_home_cell:
+                return self.Astar(game_state, food)
+            
+            # The edibles list is ordered by distance, so if the food is too far away, break
+            if distance_between_pacman_and_food > distance_between_ghost_and_my_home_cell:
+                break
+
+            if distance_between_food_and_my_home_cell > distance_between_ghost_and_my_home_cell:
+                break
+        
+        # If no food is reachable, go back home
+        return self.Astar(game_state, closest_home)
+    
+    def get_closest_home_cell_position(self, game_state):
+        return super().get_closest_home_cell_position(game_state)[0]
 
 class DefensiveReflexAgent(ReflexCaptureAgent):
     """
