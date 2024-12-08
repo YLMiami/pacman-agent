@@ -150,6 +150,8 @@ class ReflexCaptureAgent(CaptureAgent):
         self.previous_score = 0
         self.enemy_is_attacking = False
         self.steps_since_last_food_eaten = 0
+         
+        self.save_my_location = set()
 
     def register_initial_state(self, game_state):
         self.start = game_state.get_agent_position(self.index)  # Start position of the agent (int x, int y)
@@ -395,7 +397,7 @@ class ReflexCaptureAgent(CaptureAgent):
         """
         home_list = self.get_edge_home_cells(game_state)
         home = self.sort_positions_by_distance(game_state, home_list)
-        return home[:1] # home[0] why not this?
+        return home[0] # home[0] why not this?
     
 
     def get_closest_reachable_home_cell_position(self, game_state, agent_location=None, enemy_location=None):
@@ -507,6 +509,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
     Cool Attacker
     """
     def choose_action(self, game_state):
+        print("-" * 50)
         print("Attacker")
         # If the agent is pacman, meaning that is the opponent's side
         if self.is_pacman(game_state):
@@ -515,17 +518,20 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
             agent_location = self.get_my_position(game_state)
             enemy_ghosts, scared_enemy_ghosts = self.get_enemy_ghost_positions(game_state)
             if self.get_food_count(game_state) <= 2:
-                closest_ghost = min(enemy_ghosts, key = lambda ghost: self.get_maze_distance(agent_location, ghost))
-                return self.go_home(game_state, agent_location, closest_ghost=None)
+                print("I'm going home to secure the win!")
+                closest_ghost = min(enemy_ghosts, key = lambda ghost: self.get_maze_distance(agent_location, ghost)) if enemy_ghosts else None
+                return self.go_home(game_state, agent_location, closest_ghost=closest_ghost)
             
             edibles_positions = self.get_edibles(game_state)
 
             # If there are scared enemy ghosts, it means that we ate a power-up, so go either after food indisturbed or after the closest enemy
             if scared_enemy_ghosts and not enemy_ghosts:
+                print("The enemy is scared and there not enemy ghosts. I'm going after food or enemy without being disturbed...")
                 return self.Astar(game_state, edibles_positions[0])
             
             # If it's being chased by an enemy ghost, plan an escape strategy
             if enemy_ghosts:
+                print("I'm being chased by an enemy ghost. I'm planning an escape strategy...")
                 best_action = self.plan_escape_strategy(game_state, enemy_ghosts)
                 return best_action
 
@@ -533,27 +539,33 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
             # If the agent is carrying food
             carrying = self.num_carrying(game_state)
             if carrying:
+                print("I'm carrying food.")
                 # Check if the timeleft is low and the agent can make it back home
                 if self.check_timeleft_wrt_distance(game_state):
+                    print("I'm going home because the time is running out.")
                     # If the agent can beat the time to return home, return home
                     return self.go_home(game_state)
             
             # Go for closest food if there are no other problems
+            print("I'm going after food...")
             return self.Astar(game_state, edibles_positions[0])
             
         else:
             # The agent is a ghost
+            print("I'm a ghost.")
             edibles_positions = self.get_edibles(game_state)
+            agent_location = self.get_my_position(game_state)
 
             # Check if there are enemy pacmen on the agent's side (also the defender should communicate for pacman checking)
-            enemy_pacmen = self.get_enemy_pacmen_positions(game_state)
+            enemy_pacmen = self.sort_positions_by_distance(game_state, self.get_enemy_pacmen_positions(game_state))
             if enemy_pacmen:
+                print("I see enemy pacmen.")
                 # If the agent is scared, go after food in the other half.
                 if self.scared(game_state):
-                    agent_location = self.get_my_position(game_state)
+                    print("I'm scared, going after food...")
                     for food in edibles_positions:
                         distance_between_me_and_food = self.get_maze_distance(agent_location, food)
-                        distance_between_enemy_pacman_and_food = self.get_maze_distance(enemy_pacmen, food)
+                        distance_between_enemy_pacman_and_food = min(self.get_maze_distance(pacman, food) for pacman in enemy_pacmen)
                         if distance_between_me_and_food < distance_between_enemy_pacman_and_food:
                             return self.Astar(game_state, food)
                         
@@ -578,12 +590,30 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
                 food_enemy_carrying = self.total_food_enemies - len(food_we_are_defending) - food_enemy_ate
                 
                 # If he's carrying a lot of food, go after the enemy pacmen
-                if food_enemy_carrying > 10: # How to define a lot(?)
+                if food_enemy_carrying > 5: # How to define a lot(?)
                     # Become defender
-                    pass
-                    # return self.Astar(game_state, enemy_pacmen[0])
+                    print("Enemy is carrying a lot of food. I'm going after him...")    
+                    return self.Astar(game_state, enemy_pacmen[0])
+
+
+            enemy_ghosts, scared_enemy_ghosts = self.get_enemy_ghost_positions(game_state)
+            
+            # If you see enemy ghosts and you're a ghost
+            if enemy_ghosts:
+                print("I see enemy ghosts.")
+                for food in edibles_positions:
+                    distance_between_my_ghost_and_food = self.get_maze_distance(agent_location, food)
+                    distance_between_enemy_ghost_and_food = self.get_maze_distance(food, enemy_ghosts[0])
+
+                    # Go after food only if you can manage to get it and go back home before the ghost catches you
+                    if distance_between_my_ghost_and_food < distance_between_enemy_ghost_and_food:
+                        return self.Astar(game_state, food)
+                # excluded_cells = self.get_edge_home_cells(game_state, enemy_home=True)
+                # excluded_cells.sort(key=lambda cell: self.get_maze_distance(self.get_my_position(game_state), cell) + self.get_maze_distance(enemy_ghosts[0], cell))
+                # return self.Astar(game_state, edibles_positions[1] , excluded_cells[:1])
 
             # Go for closest food if there is no rush in escaping or killing enemy. Do your duty as an attacker!
+            print("I'm going after food...")
             return self.Astar(game_state, edibles_positions[0])
     
     def go_home(self, game_state, agent_location=None, closest_ghost=None):
@@ -605,6 +635,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         agent_location = self.get_my_position(game_state)
         action_to_capsule = self.go_to_capsule(game_state, agent_location, enemy_ghosts)
         if action_to_capsule:
+            print("I'm going after a capsule to escape...")
             return action_to_capsule
 
         # Retrieve locations of closest ghost and closest reachable home cell
@@ -614,9 +645,11 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         # Go after food only if you can manage to get it and go back home before the ghost catches you
         action_to_food = self.go_to_food(game_state, agent_location, closest_ghost, closest_home)
         if action_to_food:
+            print("I'm going after food because I know I can escape escape...")
             return action_to_food
         
         # If no food is reachable, go back home
+        print("No food is reachable. I'm going home...")
         return self.Astar(game_state, closest_home)
     
     def go_to_capsule(self, game_state, agent_location, enemy_ghosts):
@@ -656,10 +689,6 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         distance_to_home = self.get_maze_distance(agent_location, closest_home)
         return distance_to_home * 4  < game_state.data.timeleft < distance_to_home * 6    # 1.5 times distance to home
 
-        
-    
-    def get_closest_home_cell_position(self, game_state):
-        return super().get_closest_home_cell_position(game_state)[0]
 
 
 class DefensiveReflexAgent(ReflexCaptureAgent):
@@ -668,58 +697,78 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
     """
     def choose_action(self, game_state):
         # start = time.time()
+        print("-" * 50)
         print("Defender")
 
         # If the game just started, predict the most likely target for enemy attacker and go there
         if game_state.data.timeleft > 1050: # can be made better
             closest_food_to_enemy = self.predict_initial_target(game_state)
-            print(closest_food_to_enemy)
             return closest_food_to_enemy
         
         # If the agent is a ghost, meaning that is on its own side
+        excluded_cells = self.get_edge_home_cells(game_state, enemy_home=True)
         if not self.is_pacman(game_state):
-            excluded_cells = self.get_edge_home_cells(game_state, enemy_home=True)
             # Plan defense
 
             # if you are scared, go in attack after the closest food
             if self.scared(game_state):
+                print("I'm scared, going after food...")
                 closest_food = self.get_edibles(game_state)
                 return self.Astar(game_state, closest_food[0])
+            
             # If you see any pacman, follow him
             enemy_pacmen = self.get_enemy_pacmen_positions(game_state)
             if enemy_pacmen:
+                print("Chasing enemy pacman...")
+                my_loc = self.get_my_position(game_state)
+                if my_loc not in self.save_my_location:
+                    self.save_my_location.add(my_loc)
+                else:
+                    print(f"I'm stuck in a loop. Don't pass from this cell anymore...{my_loc}")
+                    excluded_cells += [my_loc]
                 # closest_food_to_enemy = self.go_to_closest_food_from_enemy_position(self, game_state, enemy_pacmen[0])
                 return self.Astar(game_state, enemy_pacmen[0], excluded_cells)
             
+            self.save_my_location.clear()
             # If the enemy is eating food, go after him by predicting the next food he's going to eat and going there
-            enemy_location = self.predict_enemy_from_food_disappearance(game_state)
-            if enemy_location and self.steps_since_last_food_eaten < 10:
-                closest_food_to_enemy = self.closest_food_to_location(game_state, enemy_location)
-                print(closest_food_to_enemy)
+            predicted_enemy_location = self.predict_enemy_from_food_disappearance(game_state)
+            if predicted_enemy_location and self.steps_since_last_food_eaten < 10:
+                print("Predicting enemy location...")
+                closest_food_to_enemy = self.closest_food_to_location(game_state, predicted_enemy_location)
                 return self.Astar(game_state, closest_food_to_enemy, excluded_cells)
 
         else:
             # The defender agent is a pacman
-            pass
+            predicted_enemy_location = self.predict_enemy_from_food_disappearance(game_state)
+            if self.enemy_is_attacking:
+                print("Enemy is attacking... going back in defense")
+                return self.Astar(game_state, predicted_enemy_location)
+            
+            # If the enemy is not attacking, keep going after the closest food
+            print("Well, I'm in attack and they are not attacking, soo I'm going after food...")
+            closest_foods = self.get_edibles(game_state)
+            return self.Astar(game_state, closest_foods[0])
 
+        print("I'm a ghost. I'm not scared. I don't see any enemy pacman nor they are attacking.")
+        print("I'm going to predict the next move of the opponent. I'm going to defend the part of my map with the highest density of food.")
         home_cells = self.get_edge_home_cells(game_state)
         food_we_are_defending = self.get_our_food(game_state)
         # find center of the most dense food cluster
         food_cluster_center = min(food_we_are_defending, key=lambda food: sum(self.get_maze_distance(food, other_food) for other_food in food_we_are_defending))
-
+        print("Food cluster center:", food_cluster_center)
         # sort home cell by closest to the center of the most dense food cluster
         closest_entry_cell = min(home_cells, key=lambda food: self.get_maze_distance(food, food_cluster_center))
 
         # get random cell between the closest entry cell and the center of the most dense food cluster which is not a wall in a 4x4 window
         middle_cell = (closest_entry_cell[0] + food_cluster_center[0]) // 2, (closest_entry_cell[1] + food_cluster_center[1]) // 2
 
-        print(middle_cell, food_cluster_center)
+        #print(middle_cell, food_cluster_center)
         middle_cell = nearest_open_space(game_state, middle_cell)
         food_cluster_center = nearest_open_space(game_state, food_cluster_center)
-        print(closest_entry_cell, middle_cell, food_cluster_center)
+        #print(closest_entry_cell, middle_cell, food_cluster_center)
 
         best_defense_location = random.choice([closest_entry_cell, middle_cell, food_cluster_center])
-        print(best_defense_location)
+        #print(best_defense_location)
 
         # Update the score
         self.previous_score = game_state.data.score
@@ -735,7 +784,7 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         # Get enemy start location
         w, h = arena_width(game_state), arena_height(game_state)
         x_my_start_location, y_my_start_location = self.start
-        enemy_start_location = w - x_my_start_location + 1, h - y_my_start_location + 1
+        enemy_start_location = w - x_my_start_location - 1, h - y_my_start_location - 1
 
         # Get the closest food to the enemy start location
         return self.go_to_closest_food_from_enemy_position(game_state, enemy_start_location)
@@ -771,6 +820,13 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
             self.enemy_is_attacking = False
             return self.last_food_eaten_by_enemy
         
+        if self.enemy_is_attacking:
+            return self.last_food_eaten_by_enemy
+        
+        if self.steps_since_last_food_eaten > 10:
+            return None
+        
+
         self.steps_since_last_food_eaten += 1
         return None
     
