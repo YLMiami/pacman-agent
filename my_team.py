@@ -443,12 +443,16 @@ class ReflexCaptureAgent(CaptureAgent):
 
     ### Pathfinding and Scoring ###
 
-    def score(self, my_pos, target, distance_traveled):
+    def score(self, my_pos, target, distance_traveled, enemy_penalty):
         """
-        Calculates a heuristic score for A* pathfinding.
+        Calculates a heuristic score for A* pathfinding with path-specific enemy avoidance.
+        Adds a penalty if enemies are near or along the evaluated path to the target.
         """
-        f_n = distance_traveled + self.get_maze_distance(my_pos, target)   # f(n) = g(n) + h(n)
-        return f_n
+        # Base score: f(n) = g(n) + h(n)
+        base_score = distance_traveled + self.get_maze_distance(my_pos, target) + enemy_penalty
+
+        return base_score
+
 
     def Astar(self, game_state, target, excluded_positions=[]):
 
@@ -493,8 +497,31 @@ class ReflexCaptureAgent(CaptureAgent):
             "previous" : previous,
             "action" : action
         }
-        score = self.score(self.get_my_position(game_state), target, distance_traveled)
+        # Simulate the next path positions (evaluate positions after this action)
+        next_my_pos = self.get_my_position(game_state)
+        enemy_penalty = self.simulate_next_positions(game_state, next_my_pos) if action else 0
+
+        # Calculate heuristic score
+        score = self.score(next_my_pos, target, distance_traveled, enemy_penalty)
         pq.put((score, next(counter), next_state))
+
+    def simulate_next_positions(self, next_game_state, my_pos):
+        """
+        Simulates the next positions based on the agent's current position and an action.
+        """
+
+        # Evaluate the new position after taking the action
+        # Add penalty if an enemy is near or on the path
+        if next_game_state:
+            enemy_ghosts, _ = self.get_enemy_ghosts_agent_can_see(next_game_state, my_pos)
+            penalty = 0
+            for ghost in enemy_ghosts:
+                distance_to_position = self.get_maze_distance(ghost, my_pos)
+                if distance_to_position < 2:  # Penalize if ghost is directly on or adjacent to the path
+                    penalty += 20  # Apply a fixed penalty
+            
+        return penalty
+
 
     def get_from_prio_queue(self, pq):
         return pq.get()[2]
@@ -625,13 +652,13 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
                 return action
             
         # If it was in a deadlock, handle the deadlock
-        if self.handle_deadlock(agent_location):
-            return self.Astar(game_state, self.escape_deadlock_cell)
+        #if self.handle_deadlock(agent_location):
+        #    return self.Astar(game_state, self.escape_deadlock_cell)
         
         # If you see enemy ghosts and you're a ghost
-        if enemy_ghosts:
-            print("Enemy ghosts detected, planning escape strategy.")
-            return self.handle_ghosts(game_state,  enemy_ghosts, edibles_positions, agent_location)
+        #if enemy_ghosts:
+        #    print("Enemy ghosts detected, planning escape strategy.")
+        #    return self.handle_ghosts(game_state,  enemy_ghosts, edibles_positions, agent_location)
 
 
 
@@ -687,6 +714,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
                 self.escape_deadlock = False
             else:
                 print("I'm still exiting a deadlock.")
+                print("My location:", agent_location)
                 print("Escape cell:", self.escape_deadlock_cell)
                 return True
         return False
@@ -859,25 +887,35 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
                 return self.Astar(game_state, enemy_pacmen[0], excluded_cells)
             
             self.save_my_location.clear()
-            # If the enemy is eating food, go after him by predicting the next food he's going to eat and going there
-            predicted_enemy_location = self.predict_enemy_from_food_disappearance(game_state)
-            if predicted_enemy_location and self.steps_since_last_food_eaten < 10:
-                print("Predicting enemy location...")
-                closest_food_to_enemy = self.closest_food_to_location(game_state, predicted_enemy_location)
-                return self.Astar(game_state, closest_food_to_enemy, excluded_cells)
 
         else:
             # The defender agent is a pacman
+            if self.get_food_count(game_state) <= 2:
+                print("Going home to secure a win.")
+                closest_home = self.get_closest_home_cell_position(game_state)
+                return self.Astar(game_state, closest_home)
+            
+
+            # If the enemy is eating food, go after him by predicting the next food he's going to eat and going there
             predicted_enemy_location = self.predict_enemy_from_food_disappearance(game_state)
-            if self.enemy_is_attacking:
-                print("Enemy is attacking... going back in defense")
-                return self.Astar(game_state, predicted_enemy_location)
+        
+            closest_food = self.get_edibles(game_state)
+            if self.scared(game_state) or not self.enemy_is_attacking:
+                print("I'm a pacman, either I'm scared or the enemy is not attacking...")
+                return self.Astar(game_state, closest_food[0])
             
             # If the enemy is not attacking, keep going after the closest food
-            print("Well, I'm in attack and they are not attacking, soo I'm going after food.")
-            closest_foods = self.get_edibles(game_state)
-            return self.Astar(game_state, closest_foods[0])
+            #print("Well, I'm in attack and they are not attacking, soo I'm going after food.")
+            #closest_foods = self.get_edibles(game_state)
+            #return self.Astar(game_state, closest_foods[0])
 
+        # If the enemy is eating food, go after him by predicting the next food he's going to eat and going there
+        predicted_enemy_location = self.predict_enemy_from_food_disappearance(game_state)
+        if predicted_enemy_location:
+            print(f"Predicting enemy location...{predicted_enemy_location}")
+            closest_food_to_enemy = self.closest_food_to_location(game_state, predicted_enemy_location)
+            return self.Astar(game_state, closest_food_to_enemy, excluded_cells)
+        
         print("I'm a ghost. I'm not scared. I don't see any enemy pacman nor they are attacking.")
         print("I'm going to predict the next move of the opponent. I'm going to defend the part of my map with the highest density of food.")
         home_cells = self.get_edge_home_cells(game_state)
@@ -896,7 +934,7 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         food_cluster_center = nearest_open_space(game_state, food_cluster_center)
         #print(closest_entry_cell, middle_cell, food_cluster_center)
 
-        best_defense_location = random.choice([closest_entry_cell, middle_cell, food_cluster_center])
+        best_defense_location = random.choice([closest_entry_cell, middle_cell])
         #print(best_defense_location)
 
         # Update the score
@@ -933,7 +971,8 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         """
         previous_food_we_are_defending = self.our_food
         food_we_are_defending = set(self.get_our_food(game_state))
-
+        print("Food we are defending", food_we_are_defending)
+        print("Previous food we are defending", previous_food_we_are_defending)
         food_eaten = previous_food_we_are_defending - food_we_are_defending
         if food_eaten:
             food_eaten = food_eaten.pop() if food_eaten else None
@@ -941,6 +980,7 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
             self.last_food_eaten_by_enemy = food_eaten
             self.enemy_is_attacking = True
             self.steps_since_last_food_eaten = 0
+            print("Food eaten", self.enemy_is_attacking, game_state.data.timeleft)
             return food_eaten
         
         # if we are red and the score goes down, it means that the enemy scored
@@ -964,7 +1004,7 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         Returns the closest food to the enemy location
         """
         food_positions = self.get_our_food(game_state)
-        print(food_positions, enemy_location)
+        print(f"Food locations: {food_positions}")
         closest_food = min(food_positions, key=lambda food: self.get_maze_distance(food, enemy_location))
-        print(closest_food)
+        print(f"Closest food to enemy: {closest_food}")
         return closest_food
