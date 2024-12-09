@@ -914,7 +914,7 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
             if self.scared(game_state):
                 print("I'm scared, going after food...")
                 closest_food = self.get_edibles(game_state)
-                return self.Astar(game_state, closest_food[0])
+                return self.Astar(game_state, random.choice(closest_food))
             
             # If you see any pacman, follow him
             enemy_pacmen = self.get_enemy_pacmen_positions(game_state)
