@@ -788,11 +788,12 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
                 return self.Astar(game_state, self.get_farthest_home_cell_position(game_state))
         else:
             closest_home = self.get_closest_home_cell_position(game_state)
-
-        if len(set(self.save_my_location)) < 5:
-            middle_point = (closest_home[0] + agent_location[0]) // 2, (closest_home[1] + agent_location[1]) // 2
-            nearest_point = nearest_open_space(game_state, middle_point)
-            return self.Astar(game_state, nearest_point)
+            idx = ((1200-game_state.data.timeleft)//4) % 15
+            if len(set(self.save_my_location)) < 5 and self.save_my_location[idx - 2] != self.save_my_location[idx - 1] and self.save_my_location[idx - 1] == agent_location:
+                print("Deadlock")
+                #middle_point = (closest_home[0] + agent_location[0]) // 2, (closest_home[1] + agent_location[1]) // 2
+                #nearest_point = nearest_open_space(game_state, middle_point)
+                return "Stop"
 
         return self.Astar(game_state, closest_home)
     
@@ -813,7 +814,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         if not closest_home:
             # Lure the defender away
             farthest_home =  self.get_farthest_home_cell_position(game_state)
-            print("No safe home cell. I'm luring the defender away...{farthest_home}")
+            print(f"No safe home cell. I'm luring the defender away...{farthest_home}")
             #return self.Astar(game_state, farthest_home)
             closest_home = farthest_home
 
@@ -826,13 +827,13 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         if self.handle_deadlock(agent_location):
                 return self.Astar(game_state, self.escape_deadlock_cell)
             
-        # If you see enemy ghosts and you're a ghost
         # if enemy_ghosts:
         if len(set(self.save_my_location)) < 5:
-            print("Enemy ghosts detected, planning escape strategy.")
+            print("Deadlockkkk")
             # if distance between ghost and me is more than 2, get closer.
             if self.get_maze_distance(agent_location, closest_ghost) > 2:
-                return self.Astar(game_state, closest_ghost)
+                print("Go closer to ghost")
+                return self.Astar(game_state, agent_location)
             else:
                 return self.get_deadlock_cell(game_state, closest_ghost)
 
@@ -884,7 +885,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         agent_location = self.get_my_position(game_state)
         closest_home = self.get_closest_home_cell_position(game_state)
         distance_to_home = self.get_maze_distance(agent_location, closest_home)
-        return distance_to_home * OffensiveReflexAgent.TIME_MARGIN_FACTOR  < game_state.data.timeleft < distance_to_home * OffensiveReflexAgent.TIME_MARGIN_FACTOR*1.5    # 1.5 times distance to home
+        return distance_to_home * OffensiveReflexAgent.TIME_MARGIN_FACTOR  < game_state.data.timeleft < distance_to_home * OffensiveReflexAgent.TIME_MARGIN_FACTOR*2    # 1.5 times distance to home
 
 
 
@@ -1040,6 +1041,7 @@ class DefensiveReflexAgent(ReflexCaptureAgent):
         if (self.red and game_state.data.score < self.previous_score) or (not self.red and game_state.data.score > self.previous_score):
             print("Enemy scored")
             # Blue or red scored
+            self.previous_score = game_state.data.score
             self.enemy_is_attacking = False
             return self.last_food_eaten_by_enemy
         
