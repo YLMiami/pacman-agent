@@ -778,7 +778,6 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         """
         Returns the best action to take to go home.
         """
-
         if closest_ghost:
             print("There are ghosts!")
             closest_home = self.get_closest_reachable_home_cell_position(game_state, agent_location, closest_ghost)
@@ -787,13 +786,16 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
                 print("I'm luring the defender away...")
                 return self.Astar(game_state, self.get_farthest_home_cell_position(game_state))
         else:
+            agent_location = self.get_my_position(game_state)
             closest_home = self.get_closest_home_cell_position(game_state)
             idx = ((1200-game_state.data.timeleft)//4) % 15
-            if len(set(self.save_my_location)) < 5 and self.save_my_location[idx - 2] != self.save_my_location[idx - 1] and self.save_my_location[idx - 1] == agent_location:
-                print("Deadlock")
-                #middle_point = (closest_home[0] + agent_location[0]) // 2, (closest_home[1] + agent_location[1]) // 2
-                #nearest_point = nearest_open_space(game_state, middle_point)
-                return "Stop"
+            if len(set(self.save_my_location)) < 5:
+                if self.get_maze_distance(agent_location, closest_ghost) > 2 and self.save_my_location[idx - 2] != self.save_my_location[idx - 1] and self.save_my_location[idx - 1] != agent_location:
+                    print("Go closer to ghost") 
+                    print("Deadlock")
+                    #middle_point = (closest_home[0] + agent_location[0]) // 2, (closest_home[1] + agent_location[1]) // 2
+                    #nearest_point = nearest_open_space(game_state, middle_point)
+                    return "Stop"
 
         return self.Astar(game_state, closest_home)
     
@@ -821,7 +823,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         # Go after food only if you can manage to get it and go back home before the ghost catches you
         action_to_food = self.go_to_food(game_state, agent_location, closest_ghost, closest_home)
         if action_to_food:
-            print("I'm going after food because I know I can escape escape...")
+            print("I'm going after food because I know I can escape...")
             return action_to_food
         
         if self.handle_deadlock(agent_location):
@@ -885,7 +887,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         agent_location = self.get_my_position(game_state)
         closest_home = self.get_closest_home_cell_position(game_state)
         distance_to_home = self.get_maze_distance(agent_location, closest_home)
-        return distance_to_home * OffensiveReflexAgent.TIME_MARGIN_FACTOR  < game_state.data.timeleft < distance_to_home * OffensiveReflexAgent.TIME_MARGIN_FACTOR*2    # 1.5 times distance to home
+        return game_state.data.timeleft < distance_to_home * OffensiveReflexAgent.TIME_MARGIN_FACTOR*2    # 1.5 times distance to home
 
 
 
