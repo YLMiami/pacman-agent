@@ -26,17 +26,15 @@ sys.path.append('./pacman-contest/src/contest')
 import util as util
 
 from capture_agents import CaptureAgent
-from game import Directions
+# from game import Directions
 from util import nearest_point, Stack
 
 from queue import PriorityQueue
-from itertools import product, count
+from itertools import count
 
 #################
 # Team creation #
 #################
-
-help_me = False
 
 def create_team(first_index, second_index, is_red,
                 first='OffensiveReflexAgent', second='DefensiveReflexAgent', num_training=0):
@@ -790,14 +788,18 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
             closest_home = self.get_closest_home_cell_position(game_state)
             idx = ((1200-game_state.data.timeleft)//4) % 15
             if len(set(self.save_my_location)) < 5:
+                print("Deadlock")
+
                 # stop for 2 moves
                 if self.save_my_location[idx - 3] != "Stop":
-                    print("Go closer to ghost") 
-                    print("Deadlock")
+                    print("Stop for 3 moves")
                     self.save_my_location[idx] = "Stop"
                     #middle_point = (closest_home[0] + agent_location[0]) // 2, (closest_home[1] + agent_location[1]) // 2
                     #nearest_point = nearest_open_space(game_state, middle_point)
                     return "Stop"
+                else:
+                    print("Go to farthest cell")
+                    return self.Astar(game_state, self.get_farthest_home_cell_position(game_state))
 
         return self.Astar(game_state, closest_home)
     
@@ -864,7 +866,7 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         edibles_positions = self.get_edibles(game_state)    # food or enemy ghosts if not scared
         for food in edibles_positions:
             distance_between_pacman_and_food = self.get_maze_distance(agent_location, food)
-            distance_between_food_and_my_home_cell = self.get_maze_distance(food, closest_home)
+            # distance_between_food_and_my_home_cell = self.get_maze_distance(food, closest_home)
 
             open_space = nearest_open_space(game_state, food)
             distance_between_ghost_and_open_space = self.get_maze_distance(closest_ghost, open_space)
