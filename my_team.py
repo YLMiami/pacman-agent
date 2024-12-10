@@ -790,9 +790,11 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
             closest_home = self.get_closest_home_cell_position(game_state)
             idx = ((1200-game_state.data.timeleft)//4) % 15
             if len(set(self.save_my_location)) < 5:
-                if self.get_maze_distance(agent_location, closest_ghost) > 2 and self.save_my_location[idx - 2] != self.save_my_location[idx - 1] and self.save_my_location[idx - 1] != agent_location:
+                # stop for 2 moves
+                if self.save_my_location[idx - 3] != "Stop":
                     print("Go closer to ghost") 
                     print("Deadlock")
+                    self.save_my_location[idx] = "Stop"
                     #middle_point = (closest_home[0] + agent_location[0]) // 2, (closest_home[1] + agent_location[1]) // 2
                     #nearest_point = nearest_open_space(game_state, middle_point)
                     return "Stop"
